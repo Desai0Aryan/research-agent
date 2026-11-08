@@ -21,6 +21,20 @@ class Settings(BaseSettings):
     chunk_overlap_words: int = 40
     max_upload_mb: int = 50
 
+    # ---- LLM / agent ----
+    llm_provider: str = "none"  # none (offline heuristic engine) | anthropic | openai
+    llm_model: str = ""  # defaults: claude-sonnet-5-5 / gpt-4o-mini
+    anthropic_api_key: str | None = None
+    reranker: str = "lexical"  # lexical | llm | cross-encoder
+    cross_encoder_model: str = "BAAI/bge-reranker-base"
+    max_subquestions: int = 4
+    max_rounds: int = 2
+    candidate_k: int = 20
+    evidence_per_subq: int = 5
+    max_evidence: int = 16
+    sufficiency_threshold: float = 0.35
+    strict_citations: bool = True
+
     rrf_k: int = 60
     candidate_pool: int = 50
 

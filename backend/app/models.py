@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Computed, DateTime, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from .config import get_settings
@@ -62,3 +62,21 @@ class Chunk(Base):
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
     )
+
+
+class ResearchRun(Base):
+    """One agent execution: full result + event trace. Feeds the evaluation/feedback loop (Part 3)."""
+
+    __tablename__ = "research_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    question: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="running")  # running|done|failed
+    result = mapped_column(JSONB, nullable=True)
+    metrics = mapped_column(JSONB, nullable=True)
+    trace = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # -1 / 0 / 1 (Part 3)
+    feedback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

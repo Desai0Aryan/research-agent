@@ -24,7 +24,7 @@ def normalize(text: str) -> str:
     return text.strip()
 
 
-def _sentences(text: str) -> list[str]:
+def split_sentences(text: str) -> list[str]:
     return [s.strip() for s in _SPLIT.split(text) if s and s.strip()]
 
 
@@ -38,7 +38,7 @@ def chunk_page(text: str, page: int, target: int = 180, overlap: int = 40) -> li
         return []
 
     units: list[str] = []
-    for s in _sentences(text):
+    for s in split_sentences(text):
         words = s.split()
         if len(words) > int(target * 1.5):  # pathological long "sentence" (tables, code)
             step = target

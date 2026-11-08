@@ -28,3 +28,24 @@ def to_or_tsquery(query: str) -> str | None:
     """Build a safe `a | b | c` string for to_tsquery. Tokens are [a-z0-9]+ only, so no injection."""
     terms = keyword_terms(query)
     return " | ".join(terms) if terms else None
+
+
+def stem(t: str) -> str:
+    for suf in ("ing", "ed", "es", "s", "ly"):
+        if len(t) > len(suf) + 3 and t.endswith(suf):
+            return t[: -len(suf)]
+    return t
+
+
+def stems(text: str) -> set[str]:
+    return {stem(t) for t in keyword_terms(text, 64)}
+
+
+def coverage(claim: str, passage: str) -> float:
+    """Fraction of the claim's content stems that appear in the passage (0..1)."""
+    cs = stems(claim)
+    return len(cs & stems(passage)) / len(cs) if cs else 0.0
+
+
+def numbers(text: str) -> set[str]:
+    return set(re.findall(r"\d+(?:\.\d+)?", text))
