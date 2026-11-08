@@ -40,26 +40,31 @@ def llm_write(question, sub_questions, evidence, llm: LLM) -> dict:
 
 def extractive_write(question, sub_questions, evidence, per_sq: dict[int, list[str]]) -> dict:
     """Offline writer: picks the best sentences per sub-question. Every claim is quotable by construction."""
-    sections, used = [], set()
-    gaps = []
-    for i, sq in enumerate(sub_questions):
+    sections, used, gaps = [], set(), []
+    # index 0 is the umbrella question when it was split; its evidence is covered by the specific sub-questions
+    indices = range(1, len(sub_questions)) if len(sub_questions) > 1 else range(len(sub_questions))
+    for i in indices:
+        sq = sub_questions[i]
         cands = []
         for eid in per_sq.get(i, []):
             for s in split_sentences(evidence[eid]["text"]):
                 if len(s.split()) >= 6 and not s.startswith("#"):
                     cands.append((coverage(sq, s), eid, s))
         cands.sort(key=lambda x: -x[0])
+        relevant = [c for c in cands if c[0] >= 0.2]
         claims, seen_e = [], set()
-        for cov, eid, s in cands:
-            if cov < 0.2 or (eid, s) in used or len(claims) >= 3:
+        for cov, eid, s in relevant:
+            if (eid, s) in used or len(claims) >= 3:
                 continue
             if eid in seen_e and len(claims) >= 2:
                 continue
             claims.append({"text": re.sub(r"^#+\s*", "", s), "evidence": [eid]})
             used.add((eid, s))
             seen_e.add(eid)
+        heading = sq.rstrip("?").strip()
+        heading = heading[:1].upper() + heading[1:]
         if claims:
-            sections.append({"heading": sq.rstrip("?"), "claims": claims})
-        else:
+            sections.append({"heading": heading, "claims": claims})
+        elif not relevant:  # genuinely nothing relevant (not merely already used elsewhere)
             gaps.append(f"No sufficiently relevant evidence found for: {sq}")
     return {"title": question.rstrip("?"), "sections": sections, "gaps": gaps}

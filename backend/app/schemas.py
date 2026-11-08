@@ -71,6 +71,7 @@ class EvidenceOut(BaseModel):
     chunk_id: uuid.UUID
     document_id: uuid.UUID
     document_title: str
+    filename: str = ""
     page: int
     text: str
     relevance: float

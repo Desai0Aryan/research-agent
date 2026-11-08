@@ -24,11 +24,16 @@ def keyword_terms(query: str, max_terms: int = 24) -> list[str]:
     return list(seen)[:max_terms]
 
 
-def to_or_tsquery(query: str) -> str | None:
-    """Build a safe `a | b | c` string for to_tsquery. Tokens are [a-z0-9]+ only, so no injection."""
-    terms = keyword_terms(query)
-    return " | ".join(terms) if terms else None
+def to_or_tsquery(query: str, expansions: dict[str, list[str]] | None = None) -> str | None:
+    """Build a safe `a | b | c` string for to_tsquery. Tokens are [a-z0-9]+ only, so no injection.
 
+    `expansions` (term -> related terms, learned from failed queries) widen the keyword query.
+    """
+    terms = keyword_terms(query)
+    if expansions:
+        extra = [e for t in terms for e in expansions.get(t, [])]
+        terms = list(dict.fromkeys(terms + [x for e in extra for x in tokenize(e) if x not in STOPWORDS]))
+    return " | ".join(terms) if terms else None
 
 def stem(t: str) -> str:
     for suf in ("ing", "ed", "es", "s", "ly"):

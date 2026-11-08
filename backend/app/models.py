@@ -80,3 +80,38 @@ class ResearchRun(Base):
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # -1 / 0 / 1 (Part 3)
     feedback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class EvalSet(Base):
+    __tablename__ = "eval_sets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(200))
+    cases = mapped_column(JSONB)  # [{id, question, gold:[{filename,page,passage}], key_facts, answerable, source}]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class EvalRun(Base):
+    __tablename__ = "eval_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    set_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("eval_sets.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    config = mapped_column(JSONB)
+    report = mapped_column(JSONB)
+    summary = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class QueryExpansion(Base):
+    """Learned keyword-search expansions. proposed -> (human review) -> enabled | rejected."""
+
+    __tablename__ = "query_expansions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    term: Mapped[str] = mapped_column(String(64), unique=True)
+    expansions = mapped_column(JSONB)  # list[str]
+    status: Mapped[str] = mapped_column(String(16), default="proposed")
+    support: Mapped[int] = mapped_column(Integer, default=1)
+    examples = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -2,12 +2,12 @@
 
 Research complex questions across hundreds of PDFs and docs, compare sources, and get a report where **every claim is cited to an exact passage and page**.
 
-> **Status: Part 2 of 5 — research agent with verified, claim-level citations.**
+> **Status: Part 3 of 5 — evaluation pipeline + feedback loop.**
 
 ## Roadmap
 - [x] **Part 1** – Docker/Postgres+pgvector, ingestion, page-aware chunking, hybrid search (vector + FTS + RRF), API
 - [x] **Part 2** – Agent: query decomposition, multi-step retrieval, reranking, cited report, citation verifier
-- [ ] Part 3 – Evaluation pipeline + failed-query feedback loop
+- [x] **Part 3** – Evaluation pipeline + failed-query feedback loop
 - [ ] Part 4 – Next.js UI with PDF citation viewer
 - [ ] Part 5 – CI, auth, observability, polish
 
@@ -53,6 +53,29 @@ Every run is persisted (result + event trace) in `research_runs`, which Part 3's
 
 **Engines.** `LLM_PROVIDER=none` runs a fully offline heuristic engine (extractive, still verified) so the whole pipeline works without keys. Set `LLM_PROVIDER=anthropic|openai` for fluent comparative reports; the verifier still cross-checks the LLM judge lexically so it cannot simply rubber-stamp hallucinations. Reranker options: `lexical`, `llm`, `cross-encoder`.
 
+## Evaluation & feedback loop (Part 3)
+```
+golden set (manual JSONL or synthetic) ─▶ retrieval eval  : recall@k · MRR · nDCG@k, per mode (hybrid / vector / keyword)
+                                       ─▶ answer eval     : key-fact correctness · faithfulness · unsupported-claim rate
+                                                            · gold-citation rate · abstention accuracy on unanswerable Qs
+                                       ─▶ failure diagnosis: ranking | lexical_gap | semantic_gap | fusion_gap | chunk_boundary
+                                                            | corpus_gap | wrongly_abstained | unsupported_claims | answered_unanswerable
+                                       ─▶ clusters + concrete config fixes ─▶ CI quality gate (eval/thresholds.json)
+production runs ─▶ 👎 ratings, empty answers, low faithfulness ─▶ clustered; out-of-vocabulary terms surfaced
+eval failures   ─▶ proposed query expansions ─▶ HUMAN approves ─▶ applied to keyword search ─▶ re-measure
+```
+- **Gold labels are (file, page, passage)**, not chunk IDs, so golden sets survive re-chunking and model swaps.
+- **Leak-free learning:** `split=train|test` is a deterministic halving by case id. Expansions are learned only from train failures and the API refuses to learn from a `test` run, so the before/after number is honest.
+- **Human in the loop:** learned expansions start as `proposed`; only `enabled` ones touch search.
+- **Synthetic cases are leaky by construction** (questions built from the passage's own words). Use them as a smoke test and rely on hand-written paraphrase cases (`samples/golden_sample.jsonl`) for real signal.
+
+```bash
+make eval                                   # run the golden set + gate; exit 1 on regression
+python scripts/eval.py --generate 30 --e2e  # synthetic set from your corpus
+make test-integration TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/research_test
+```
+Reading the first real numbers (tiny 42-chunk demo corpus, offline hash embedder): keyword retrieval (recall@5 0.89) beats dense (0.44), and hybrid RRF sits in between: a weak ranker drags a strong one down. That is the evidence-based case for a real embedding model (`EMBEDDING_PROVIDER=local|openai`) — exactly what the harness is for.
+
 ## API
 | Method | Path | Purpose |
 |---|---|---|
@@ -65,6 +88,12 @@ Every run is persisted (result + event trace) in `research_runs`, which Part 3's
 | POST | `/api/research` | Run the agent, return the cited report + metrics |
 | POST | `/api/research/stream` | Same, as Server-Sent Events (live progress) |
 | GET | `/api/research` · `/{id}` | Past runs / a stored report |
+| POST | `/api/eval/sets` · `/sets/generate` | Import JSONL / synthesise a golden set |
+| POST | `/api/eval/runs` | Run retrieval (+ `e2e` answer) evaluation, optional `split` |
+| GET | `/api/eval/runs/{id}` · `/failures` · `/compare?a=&b=` | Report · clustered failures + fixes · metric deltas |
+| POST | `/api/research/{id}/feedback` | 👍/👎 + note on a run |
+| GET | `/api/feedback/failures` | Mined production failures, clusters, out-of-vocabulary terms |
+| POST/GET/PATCH/DELETE | `/api/feedback/expansions…` | Propose → review → enable query expansions |
 | GET | `/health` | Status + counts |
 
 Known limits (addressed later): no OCR for scanned PDFs, no auth.

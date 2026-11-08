@@ -2,15 +2,32 @@
 import time
 import uuid
 
+import time as _time
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..models import Chunk, Document
+from ..models import Chunk, Document, QueryExpansion
 from ..schemas import SearchHit, SearchResponse
 from .embeddings import get_embedder
 from .fusion import rrf
 from .text import keyword_terms, to_or_tsquery
+
+
+_EXP_CACHE: dict = {"at": 0.0, "data": {}}
+
+
+def invalidate_expansions() -> None:
+    _EXP_CACHE["at"] = 0.0
+
+
+def load_expansions(db: Session, ttl: float = 15.0) -> dict[str, list[str]]:
+    """Enabled, human-approved expansions (term -> related terms). Cached briefly."""
+    if _time.monotonic() - _EXP_CACHE["at"] > ttl:
+        rows = db.execute(select(QueryExpansion.term, QueryExpansion.expansions).where(QueryExpansion.status == "enabled"))
+        _EXP_CACHE.update(at=_time.monotonic(), data={t: list(e) for t, e in rows})
+    return _EXP_CACHE["data"]
 
 
 def _vector_candidates(db: Session, qvec, pool: int, doc_ids) -> list[tuple[uuid.UUID, float]]:
@@ -21,8 +38,8 @@ def _vector_candidates(db: Session, qvec, pool: int, doc_ids) -> list[tuple[uuid
     return [(r.id, 1.0 - float(r.d)) for r in db.execute(stmt)]
 
 
-def _keyword_candidates(db: Session, query: str, pool: int, doc_ids) -> list[tuple[uuid.UUID, float]]:
-    tsq_str = to_or_tsquery(query)
+def _keyword_candidates(db: Session, query: str, pool: int, doc_ids, expansions=None) -> list[tuple[uuid.UUID, float]]:
+    tsq_str = to_or_tsquery(query, expansions)
     if not tsq_str:
         return []
     tsq = func.to_tsquery("english", tsq_str)
@@ -39,6 +56,7 @@ def search(
     top_k: int = 10,
     mode: str = "hybrid",
     document_ids: list[uuid.UUID] | None = None,
+    use_expansions: bool = True,
 ) -> SearchResponse:
     t0 = time.perf_counter()
     s = get_settings()
@@ -49,7 +67,7 @@ def search(
     if mode in ("hybrid", "vector"):
         vec = _vector_candidates(db, get_embedder().embed_one(query), pool, document_ids)
     if mode in ("hybrid", "keyword"):
-        kw = _keyword_candidates(db, query, pool, document_ids)
+        kw = _keyword_candidates(db, query, pool, document_ids, load_expansions(db) if use_expansions else None)
 
     v_rank = {cid: i for i, (cid, _) in enumerate(vec, 1)}
     k_rank = {cid: i for i, (cid, _) in enumerate(kw, 1)}

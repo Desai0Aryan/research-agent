@@ -1,0 +1,8 @@
+{
+  "_comment": "CI quality gate. Lower bounds unless the key ends with _max.",
+  "retrieval.hybrid.recall@5": 0.70,
+  "retrieval.hybrid.mrr": 0.50,
+  "answers.faithfulness": 0.90,
+  "answers.unsupported_claim_rate_max": 0.05,
+  "answers.abstention_accuracy": 0.50
+}

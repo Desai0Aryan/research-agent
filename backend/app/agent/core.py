@@ -178,7 +178,7 @@ def research(
         removed_claims=removed, gaps=gaps, citations=citations,
         evidence=[
             EvidenceOut(id=eid, chunk_id=e["r"].hit.chunk_id, document_id=e["r"].hit.document_id,
-                        document_title=e["title"], page=e["page"], text=e["text"],
+                        document_title=e["title"], filename=e["r"].hit.filename, page=e["page"], text=e["text"],
                         relevance=round(e["r"].score, 3), url=_url(e["r"].hit.document_id, e["page"]))
             for eid, e in evidence.items()
         ],
