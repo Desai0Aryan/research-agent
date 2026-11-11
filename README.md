@@ -2,22 +2,22 @@
 
 Research complex questions across hundreds of PDFs and docs, compare sources, and get a report where **every claim is cited to an exact passage and page**.
 
-> **Status: Part 3 of 5 — evaluation pipeline + feedback loop.**
+> **Status: Part 4 of 5 — full web UI.**
 
 ## Roadmap
 - [x] **Part 1** – Docker/Postgres+pgvector, ingestion, page-aware chunking, hybrid search (vector + FTS + RRF), API
 - [x] **Part 2** – Agent: query decomposition, multi-step retrieval, reranking, cited report, citation verifier
 - [x] **Part 3** – Evaluation pipeline + failed-query feedback loop
-- [ ] Part 4 – Next.js UI with PDF citation viewer
+- [x] **Part 4** – Next.js UI: live agent timeline, cited report, source viewer, library, eval dashboard, feedback review
 - [ ] Part 5 – CI, auth, observability, polish
 
 ## Quick start
 ```bash
-make up                         # Postgres+pgvector and the API on :8000
+make up                         # Postgres+pgvector, API on :8000, web UI on :3000
 python scripts/upload.py samples/*
 python scripts/upload.py --query "How does reciprocal rank fusion work?"
 python scripts/ask.py "How does RRF work, and how do we measure hallucination in RAG?"
-open http://localhost:8000/docs # interactive OpenAPI
+open http://localhost:3000      # the app  (API docs: http://localhost:8000/docs)
 ```
 Tests (no DB needed): `make test`
 
@@ -35,6 +35,19 @@ query ─▶ ┌ vector top-N  (pgvector cosine, HNSW) ┐
 - RRF avoids calibrating cosine vs. BM25-style scores.
 - Content-hash dedupe makes re-uploads idempotent.
 - Embedding provider is swappable; **changing `EMBEDDING_DIM` requires recreating the DB volume** (`docker compose down -v`).
+
+## The web UI (Part 4)
+| Screen | What you get |
+|---|---|
+| **Research** | Streams the agent live (plan → retrieval rounds → rerank → gap-retry → verify). The report shows a verdict icon per claim, clickable `[n]` citations, a faithfulness ring and coverage stats, claims the verifier **removed** (with reasons), evidence gaps, 👍/👎 feedback, copy/download as Markdown, run history. |
+| **Source panel** | Click any citation → the exact passage with the verified quote highlighted, the claim being checked + its support score, and the original PDF opened at the cited page. |
+| **Library** | Drag-and-drop multi-upload, live ingestion status, delete. |
+| **Evaluation** | Import/generate golden sets, run retrieval + end-to-end evals (train/test split), grouped-bar chart per search mode, failure analysis with fixes, side-by-side run comparison with green/red deltas. |
+| **Feedback** | Failure clusters, out-of-vocabulary terms, review/enable/reject learned query expansions. |
+
+Dark/light theme, keyboard shortcut (⌘/Ctrl+Enter), responsive layout, no runtime UI dependencies beyond React/Next/lucide (charts are hand-rolled SVG).
+Dev: `make web-dev` (needs the API on :8000). Checks: `make test-web` (typecheck, SSE-parser/quote-locator tests, production build).
+The native browser PDF viewer cannot highlight text, so the highlight lives in the passage panel next to it; the PDF opens at the right page.
 
 ## The research agent (Part 2)
 ```
