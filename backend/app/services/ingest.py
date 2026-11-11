@@ -55,10 +55,10 @@ def process_document(doc_id: uuid.UUID) -> None:
             doc.status = "processing"
             db.commit()
 
-            title, pages, mime = parse_file(stored_path(doc), doc.filename)
+            title, pages, mime, ocr_pages = parse_file(stored_path(doc), doc.filename)
             drafts = chunk_document(pages, s.chunk_target_words, s.chunk_overlap_words)
             if not drafts:
-                raise ValueError("No extractable text (scanned PDF? OCR is not enabled yet).")
+                raise ValueError("No extractable text. If this is a scanned PDF, set OCR_ENABLED=true (see requirements-ocr.txt).")
 
             embedder = get_embedder()
             rows: list[Chunk] = []
@@ -77,7 +77,7 @@ def process_document(doc_id: uuid.UUID) -> None:
                         )
                     )
             db.add_all(rows)
-            doc.title, doc.mime = title[:1000], mime
+            doc.title, doc.mime, doc.ocr_pages = title[:1000], mime, ocr_pages
             doc.num_pages, doc.num_chunks, doc.status, doc.error = len(pages), len(rows), "ready", None
             db.commit()
             log.info("Ingested %s: %d pages, %d chunks", doc.filename, len(pages), len(rows))

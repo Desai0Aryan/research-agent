@@ -35,8 +35,22 @@ class Settings(BaseSettings):
     sufficiency_threshold: float = 0.35
     strict_citations: bool = True
 
+    # ---- security / ops ----
+    api_keys: str = ""  # comma-separated; empty = auth disabled (dev). Sent as X-API-Key or Bearer.
+    rate_limit_per_min: int = 0  # 0 = off. Per API key (or client IP when auth is off)
+    rate_limit_heavy_per_min: int = 0  # agent runs & evals are expensive; limit them harder
+
+    # ---- OCR for scanned PDFs (needs tesseract; see requirements-ocr.txt) ----
+    ocr_enabled: bool = False
+    ocr_lang: str = "eng"
+    ocr_min_chars: int = 25  # a PDF page with less extractable text than this is treated as scanned
+
     rrf_k: int = 60
     candidate_pool: int = 50
+
+    @property
+    def api_key_list(self) -> list[str]:
+        return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 
     @property
     def upload_dir(self) -> Path:

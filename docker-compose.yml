@@ -14,7 +14,10 @@ services:
       retries: 10
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        ENABLE_OCR: ${ENABLE_OCR:-false}
     env_file: [.env]
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-research}

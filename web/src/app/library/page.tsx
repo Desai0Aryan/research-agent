@@ -58,7 +58,7 @@ export default function LibraryPage() {
                   <td className="td"><div className="flex items-center gap-2.5"><FileText className="h-4 w-4 shrink-0 text-slate-400" />
                     <div className="min-w-0"><div className="truncate font-medium">{d.title}</div><div className="truncate text-xs text-slate-500">{d.filename}</div></div></div>
                     {d.error && <div className="mt-1 text-xs text-rose-600">{d.error}</div>}</td>
-                  <td className="td hidden tabular-nums sm:table-cell">{d.num_pages || "—"}</td>
+                  <td className="td hidden tabular-nums sm:table-cell">{d.num_pages || "—"}{d.ocr_pages > 0 && <Badge tone="violet" className="ml-1.5" >{d.ocr_pages} OCR</Badge>}</td>
                   <td className="td hidden tabular-nums sm:table-cell">{d.num_chunks || "—"}</td>
                   <td className="td">{d.status === "ready" ? <Badge tone="green"><CheckCircle2 className="h-3 w-3" /> ready</Badge> : d.status === "failed" ? <Badge tone="red"><XCircle className="h-3 w-3" /> failed</Badge> : <Badge tone="amber"><Spinner className="h-3 w-3" /> {d.status}</Badge>}</td>
                   <td className="td hidden text-xs text-slate-500 md:table-cell">{ago(d.created_at)}</td>

@@ -21,7 +21,10 @@ p.add_argument("--gate", help="thresholds JSON; fail (exit 1) on regression")
 p.add_argument("--no-expansions", action="store_true")
 a = p.parse_args()
 
-with httpx.Client(base_url=a.api, timeout=1800) as c:
+import os
+
+HEADERS = {"X-API-Key": os.environ["API_KEY"]} if os.environ.get("API_KEY") else {}
+with httpx.Client(base_url=a.api, timeout=1800, headers=HEADERS) as c:
     if a.golden:
         s = c.post("/api/eval/sets", json={"name": a.golden, "jsonl": open(a.golden).read()}).json()
     elif a.generate:

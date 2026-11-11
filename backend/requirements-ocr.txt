@@ -1,0 +1,4 @@
+# Optional: OCR for scanned PDFs. Also needs the tesseract binary (apt install tesseract-ocr).
+pytesseract==0.3.13
+pypdfium2==4.30.0
+pillow==11.0.0

@@ -1,112 +1,115 @@
 # Enterprise AI Research Agent with Verifiable Citations
 
-Research complex questions across hundreds of PDFs and docs, compare sources, and get a report where **every claim is cited to an exact passage and page**.
+Ask complex questions across hundreds of PDFs and docs. The agent plans, retrieves with **hybrid search**, compares sources, writes a report, and then **checks every claim against the exact passage it cites** — dropping anything it can't support. Reliability is measured, not assumed: a built-in evaluation harness and a failed-query feedback loop ship with it.
 
-> **Status: Part 4 of 5 — full web UI.**
+> **Why it's different:** most RAG demos stop at "answer + links". Here every claim carries a verdict, a *verbatim* supporting quote, and a page-level citation; unsupported claims are removed and reported; the agent abstains when the library can't answer; and quality is gated in CI.
 
-## Roadmap
-- [x] **Part 1** – Docker/Postgres+pgvector, ingestion, page-aware chunking, hybrid search (vector + FTS + RRF), API
-- [x] **Part 2** – Agent: query decomposition, multi-step retrieval, reranking, cited report, citation verifier
-- [x] **Part 3** – Evaluation pipeline + failed-query feedback loop
-- [x] **Part 4** – Next.js UI: live agent timeline, cited report, source viewer, library, eval dashboard, feedback review
-- [ ] Part 5 – CI, auth, observability, polish
+## Highlights
+| Area | What's implemented |
+|---|---|
+| **Retrieval** | pgvector (HNSW cosine) + Postgres full-text (GIN, `ts_rank_cd`) fused with **Reciprocal Rank Fusion**; pluggable embeddings (offline hash · local sentence-transformers · OpenAI-compatible) |
+| **Agent** | query decomposition → multi-step retrieval with gap detection & query reformulation → reranking (lexical · LLM · cross-encoder) → cited report. Runs **offline** (heuristic engine) or with Anthropic / OpenAI-compatible LLMs |
+| **Verifiable citations** | atomic claims → each cites evidence IDs → verifier (LLM judge ⊕ lexical check): verbatim quote must exist in the passage, numbers must match, a "supported" judge verdict is downgraded if it can't be corroborated. Citations resolve to `…/file#page=N` |
+| **Ingestion** | PDF / MD / TXT, page-bounded sentence-packing chunker (so every chunk maps to one page), content-hash dedupe, async processing, **OCR for scanned PDFs** |
+| **Evaluation** | recall@k · MRR · nDCG per search mode; answer correctness, faithfulness, unsupported-claim rate, gold-citation rate, abstention accuracy; golden sets as `(file, page, passage)` so they survive re-chunking; **CI quality gate** |
+| **Feedback loop** | 👍/👎 + empty/low-faithfulness runs mined and clustered; root-cause diagnosis with concrete fixes; learned query expansions with **human approval** and a **leak-free train/test split** |
+| **Web UI** | live agent timeline (SSE), report with per-claim verdicts, citation → source panel with highlighted quote + PDF at the right page, library, eval dashboard, feedback review, dark mode |
+| **Ops** | Alembic migrations (adopts pre-migration DBs), optional API-key auth, rate limiting, signed document links, request IDs + access log, Docker Compose, GitHub Actions CI |
+
+## Architecture
+```mermaid
+flowchart LR
+  subgraph Ingest
+    U[Upload PDF/MD/TXT] --> P[Parse per page<br/>+ OCR if scanned] --> C[Page-bounded chunker] --> E[Embed] --> DB[(Postgres<br/>pgvector HNSW + GIN FTS)]
+  end
+  subgraph Agent
+    Q[Question] --> D[Decompose]
+    D --> R[Hybrid search per sub-question<br/>vector ⊕ keyword → RRF]
+    R --> RR[Rerank] --> G{Evidence<br/>sufficient?}
+    G -- no --> RF[Reformulate query] --> R
+    G -- yes --> W[Write atomic cited claims]
+    W --> V[Verify each claim<br/>quote · numbers · judge]
+    V --> OUT[Report + metrics<br/>unsupported claims removed]
+  end
+  DB <--> R
+  OUT --> UI[Next.js UI<br/>citation → exact passage + PDF page]
+  subgraph Quality
+    GS[Golden set] --> EV[Eval: recall/MRR/nDCG · faithfulness · abstention] --> CI[CI gate]
+    OUT -. 👎 / low faithfulness .-> FB[Failure mining & clustering] --> EX[Proposed expansions] -->|human approves| R
+    EV --> FB
+  end
+```
 
 ## Quick start
 ```bash
-make up                         # Postgres+pgvector, API on :8000, web UI on :3000
-python scripts/upload.py samples/*
-python scripts/upload.py --query "How does reciprocal rank fusion work?"
+cp .env.example .env
+make up                                   # Postgres+pgvector · API :8000 · Web :3000
+make ingest-samples                       # 6 sample docs
 python scripts/ask.py "How does RRF work, and how do we measure hallucination in RAG?"
-open http://localhost:3000      # the app  (API docs: http://localhost:8000/docs)
+open http://localhost:3000                # the UI   (API docs: http://localhost:8000/docs)
 ```
-Tests (no DB needed): `make test`
+No API key needed — the default engine is fully offline. For fluent comparative reports set `LLM_PROVIDER=anthropic|openai` (+ key) and, for real semantic recall, `EMBEDDING_PROVIDER=local|openai` (changing `EMBEDDING_DIM` needs a fresh DB: `docker compose down -v`).
+Scanned PDFs: `ENABLE_OCR=true make up` then `OCR_ENABLED=true`.
 
-## Architecture (so far)
-```
-upload ─▶ parse (pypdf per page) ─▶ chunk (sentence-packing, never crosses pages)
-       ─▶ embed (hash | local | openai) ─▶ Postgres: chunks(embedding HNSW, tsv GIN)
+**Without Docker:** run Postgres with the `vector` extension, `pip install -r backend/requirements.txt`, `cd backend && uvicorn app.main:app`, then `make web-dev`.
 
-query ─▶ ┌ vector top-N  (pgvector cosine, HNSW) ┐
-         └ keyword top-N (to_tsquery OR, ts_rank_cd) ┴▶ Reciprocal Rank Fusion ▶ hits
-                                                       (page + passage + per-retriever ranks)
-```
-**Design choices**
-- Chunks stay within a page → every citation resolves to a real PDF page (`/api/documents/{id}/file#page=N`).
-- RRF avoids calibrating cosine vs. BM25-style scores.
-- Content-hash dedupe makes re-uploads idempotent.
-- Embedding provider is swappable; **changing `EMBEDDING_DIM` requires recreating the DB volume** (`docker compose down -v`).
+## Measured behaviour (honest numbers)
+Demo corpus: 6 docs → 42 chunks, offline hash embedder, 11-case hand-written paraphrase golden set (`samples/golden_sample.jsonl`), fresh DB, no learned expansions:
 
-## The web UI (Part 4)
-| Screen | What you get |
-|---|---|
-| **Research** | Streams the agent live (plan → retrieval rounds → rerank → gap-retry → verify). The report shows a verdict icon per claim, clickable `[n]` citations, a faithfulness ring and coverage stats, claims the verifier **removed** (with reasons), evidence gaps, 👍/👎 feedback, copy/download as Markdown, run history. |
-| **Source panel** | Click any citation → the exact passage with the verified quote highlighted, the claim being checked + its support score, and the original PDF opened at the cited page. |
-| **Library** | Drag-and-drop multi-upload, live ingestion status, delete. |
-| **Evaluation** | Import/generate golden sets, run retrieval + end-to-end evals (train/test split), grouped-bar chart per search mode, failure analysis with fixes, side-by-side run comparison with green/red deltas. |
-| **Feedback** | Failure clusters, out-of-vocabulary terms, review/enable/reject learned query expansions. |
+| mode | recall@1 | recall@5 | MRR | nDCG@10 |
+|---|---|---|---|---|
+| hybrid | 0.44 | 0.78 | 0.58 | 0.66 |
+| keyword | 0.44 | 0.78 | 0.62 | 0.71 |
+| vector (hash) | 0.22 | 0.44 | 0.34 | 0.42 |
 
-Dark/light theme, keyboard shortcut (⌘/Ctrl+Enter), responsive layout, no runtime UI dependencies beyond React/Next/lucide (charts are hand-rolled SVG).
-Dev: `make web-dev` (needs the API on :8000). Checks: `make test-web` (typecheck, SSE-parser/quote-locator tests, production build).
-The native browser PDF viewer cannot highlight text, so the highlight lives in the passage panel next to it; the PDF opens at the right page.
+Answers (offline extractive engine): faithfulness **100%**, unsupported-claim rate **0%**, abstention on unanswerable questions **100%**, answer correctness 39%.
+**How to read this:** the offline hash embedder is deliberately weak, so dense retrieval drags hybrid below keyword — exactly the kind of finding the harness exists to surface (the diagnosis points at `semantic_gap` → use a real embedding model). Correctness is low because the offline writer is extractive; faithfulness stays perfect because it only quotes. These are demo-scale numbers on 11 cases, not benchmarks.
 
-## The research agent (Part 2)
-```
-question ─▶ decompose ─▶ sub-questions
-   for each: hybrid search ─▶ rerank ─▶ best score < threshold? ─▶ reformulate & retry (multi-step)
-   ─▶ de-duplicated evidence set (E1…En, each = exact chunk + page)
-   ─▶ writer: atomic claims, each citing evidence IDs     (LLM, or offline extractive writer)
-   ─▶ verifier: does the cited text entail the claim?     (LLM judge ⊕ lexical check)
-        • supporting quote must appear VERBATIM in the passage
-        • numbers in a claim must exist in the evidence
-        • a judge's "supported" is downgraded if quote/overlap can't be verified
-   ─▶ strict mode drops unsupported claims; partial ones are flagged
-   ─▶ markdown report + [n] footnotes → /api/documents/{id}/file#page=N, plus metrics
-```
-Every run is persisted (result + event trace) in `research_runs`, which Part 3's evaluation and feedback loop consume.
-
-**Engines.** `LLM_PROVIDER=none` runs a fully offline heuristic engine (extractive, still verified) so the whole pipeline works without keys. Set `LLM_PROVIDER=anthropic|openai` for fluent comparative reports; the verifier still cross-checks the LLM judge lexically so it cannot simply rubber-stamp hallucinations. Reranker options: `lexical`, `llm`, `cross-encoder`.
-
-## Evaluation & feedback loop (Part 3)
-```
-golden set (manual JSONL or synthetic) ─▶ retrieval eval  : recall@k · MRR · nDCG@k, per mode (hybrid / vector / keyword)
-                                       ─▶ answer eval     : key-fact correctness · faithfulness · unsupported-claim rate
-                                                            · gold-citation rate · abstention accuracy on unanswerable Qs
-                                       ─▶ failure diagnosis: ranking | lexical_gap | semantic_gap | fusion_gap | chunk_boundary
-                                                            | corpus_gap | wrongly_abstained | unsupported_claims | answered_unanswerable
-                                       ─▶ clusters + concrete config fixes ─▶ CI quality gate (eval/thresholds.json)
-production runs ─▶ 👎 ratings, empty answers, low faithfulness ─▶ clustered; out-of-vocabulary terms surfaced
-eval failures   ─▶ proposed query expansions ─▶ HUMAN approves ─▶ applied to keyword search ─▶ re-measure
-```
-- **Gold labels are (file, page, passage)**, not chunk IDs, so golden sets survive re-chunking and model swaps.
-- **Leak-free learning:** `split=train|test` is a deterministic halving by case id. Expansions are learned only from train failures and the API refuses to learn from a `test` run, so the before/after number is honest.
-- **Human in the loop:** learned expansions start as `proposed`; only `enabled` ones touch search.
-- **Synthetic cases are leaky by construction** (questions built from the passage's own words). Use them as a smoke test and rely on hand-written paraphrase cases (`samples/golden_sample.jsonl`) for real signal.
-
-```bash
-make eval                                   # run the golden set + gate; exit 1 on regression
-python scripts/eval.py --generate 30 --e2e  # synthetic set from your corpus
-make test-integration TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/research_test
-```
-Reading the first real numbers (tiny 42-chunk demo corpus, offline hash embedder): keyword retrieval (recall@5 0.89) beats dense (0.44), and hybrid RRF sits in between: a weak ranker drags a strong one down. That is the evidence-based case for a real embedding model (`EMBEDDING_PROVIDER=local|openai`) — exactly what the harness is for.
+## Configuration (selected)
+| Variable | Default | Purpose |
+|---|---|---|
+| `EMBEDDING_PROVIDER` / `_MODEL` / `_DIM` | `hash` / – / `384` | `hash`, `local`, `openai` |
+| `LLM_PROVIDER` / `LLM_MODEL` | `none` | `none` (offline), `anthropic`, `openai` |
+| `RERANKER` | `lexical` | `lexical`, `llm`, `cross-encoder` |
+| `STRICT_CITATIONS` | `true` | drop claims the verifier rejects |
+| `CHUNK_TARGET_WORDS` / `CHUNK_OVERLAP_WORDS` | `180` / `40` | chunking |
+| `MAX_ROUNDS`, `CANDIDATE_K`, `SUFFICIENCY_THRESHOLD` | `2`, `20`, `0.35` | multi-step retrieval |
+| `API_KEYS`, `RATE_LIMIT_PER_MIN`, `RATE_LIMIT_HEAVY_PER_MIN` | off | auth & throttling |
+| `OCR_ENABLED`, `OCR_LANG` | `false`, `eng` | scanned PDFs |
 
 ## API
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/documents` | Upload PDF/MD/TXT (multi-file, async ingest) |
-| GET | `/api/documents` · `/{id}` | List / status |
-| GET | `/api/documents/{id}/file` | Original file (for viewer) |
-| DELETE | `/api/documents/{id}` | Remove doc + chunks |
-| POST | `/api/search` | `{query, top_k, mode: hybrid\|vector\|keyword, document_ids}` |
-| GET | `/api/chunks/{id}` | Exact cited passage + neighbours |
-| POST | `/api/research` | Run the agent, return the cited report + metrics |
-| POST | `/api/research/stream` | Same, as Server-Sent Events (live progress) |
-| GET | `/api/research` · `/{id}` | Past runs / a stored report |
-| POST | `/api/eval/sets` · `/sets/generate` | Import JSONL / synthesise a golden set |
-| POST | `/api/eval/runs` | Run retrieval (+ `e2e` answer) evaluation, optional `split` |
-| GET | `/api/eval/runs/{id}` · `/failures` · `/compare?a=&b=` | Report · clustered failures + fixes · metric deltas |
-| POST | `/api/research/{id}/feedback` | 👍/👎 + note on a run |
-| GET | `/api/feedback/failures` | Mined production failures, clusters, out-of-vocabulary terms |
-| POST/GET/PATCH/DELETE | `/api/feedback/expansions…` | Propose → review → enable query expansions |
-| GET | `/health` | Status + counts |
+`POST /api/documents` · `GET /api/documents/{id}/signed-url` · `POST /api/search` · `GET /api/chunks/{id}` · `POST /api/research` (+ `/stream` SSE) · `POST /api/research/{id}/feedback` · `POST /api/eval/sets[/generate]` · `POST /api/eval/runs` · `GET /api/eval/compare` · `GET /api/feedback/failures` · `…/feedback/expansions` — full OpenAPI at `/docs`.
 
-Known limits (addressed later): no OCR for scanned PDFs, no auth.
+## Security & operations
+- **Auth (optional):** `API_KEYS=k1,k2` → `X-API-Key` / `Bearer`. `/health` and `/docs` stay open. PDFs open via **5-minute HMAC-signed links** because `<iframe>` can't send headers; a signed token unlocks exactly one file, nothing else.
+- **Rate limiting:** sliding window per key/IP, with a stricter bucket for agent/eval endpoints; returns `429` + `Retry-After`. In-memory (per process) — use Redis or a gateway for multi-replica deployments.
+- **Observability:** `X-Request-ID` and `Server-Timing` on every response; one structured access-log line per request. Every agent run persists its full trace.
+- **Caveat:** `NEXT_PUBLIC_API_KEY` is visible to browser users. Fine for an internal tool; for public deployments put real user auth (SSO / reverse proxy) in front.
+- **Schema:** Alembic (`backend/app/migrations`), applied at startup under an advisory lock. Databases created by earlier releases are adopted automatically. Create a migration: `cd backend && alembic revision --autogenerate -m "…"`.
+
+## Project layout
+```
+backend/app/
+  agent/        decompose · rerank · writer · verifier · core (the research loop) · llm clients
+  eval/         metrics · gold matching · golden-set generation · runner · diagnosis
+  services/     parsing (+OCR) · chunking · embeddings · fusion · search · ingest · research · evaluation · feedback
+  api/          documents · search · research · evaluation · feedback · health
+  middleware.py auth · rate limit · signed links · access log        migrations/  Alembic
+backend/tests/ (unit, DB-free)   backend/tests_integration/ (live Postgres)
+web/src/       app/ (research · library · eval · feedback)  components/  lib/ (typed API client, SSE parser)
+eval/thresholds.json  CI quality gate     samples/  demo corpus + golden set     docs/  design notes
+```
+
+## Testing
+`make test` — 35 backend unit tests (chunking, RRF, metrics, diagnosis, agent incl. hallucination-catching, auth/rate-limit/streaming middleware, OCR on a real image-only PDF)
+`make test-integration TEST_DATABASE_URL=…` — 9 tests on real Postgres+pgvector (ingestion → search → agent → eval → feedback; migrations incl. legacy adoption & downgrade)
+`make test-web` — typecheck, SSE/quote-locator tests, production build   ·   `make eval` — the quality gate
+CI (`.github/workflows/ci.yml`): unit · integration · web · eval gate · docker build.
+
+## Limitations & next steps
+- Heuristic engine is for offline demos; use an LLM for production-quality prose. LLM clients are implemented but were not exercised against live provider APIs in development.
+- Learned expansions only help when vocabulary gaps recur; they need a larger golden set to show measurable gains (the harness reports the held-out delta honestly).
+- Native PDF viewers can't highlight text; the highlight is shown in the passage panel beside the page.
+- Not yet: per-user accounts/ACLs, multi-tenant isolation, streaming ingestion progress, table/figure extraction, a managed job queue (ingestion uses FastAPI background tasks).
+
+See [`docs/DESIGN.md`](docs/DESIGN.md) for design decisions and trade-offs, and [`docs/TALKING_POINTS.md`](docs/TALKING_POINTS.md) for how to present this project.

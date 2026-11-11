@@ -16,8 +16,16 @@ p.add_argument("--api", default="http://localhost:8000")
 p.add_argument("--query")
 p.add_argument("--mode", default="hybrid", choices=["hybrid", "vector", "keyword"])
 a = p.parse_args()
+SUPPORTED = (".pdf", ".md", ".markdown", ".txt", ".rst")
+skipped = [f for f in a.files if not f.lower().endswith(SUPPORTED)]
+a.files = [f for f in a.files if f.lower().endswith(SUPPORTED)]
+for f in skipped:
+    print(f"skipping unsupported file: {f}")
 
-with httpx.Client(base_url=a.api, timeout=120) as c:
+import os
+
+HEADERS = {"X-API-Key": os.environ["API_KEY"]} if os.environ.get("API_KEY") else {}
+with httpx.Client(base_url=a.api, timeout=120, headers=HEADERS) as c:
     if a.files:
         handles = [("files", (f.split("/")[-1], open(f, "rb"))) for f in a.files]
         docs = c.post("/api/documents", files=handles).json()

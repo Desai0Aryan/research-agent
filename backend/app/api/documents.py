@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
+from ..middleware import sign_file_token
 from ..models import Document
 from ..schemas import DocumentOut
 from ..services.ingest import process_document, register_document, stored_path
@@ -55,6 +56,16 @@ def get_document(doc_id: uuid.UUID, db: Session = Depends(get_db)):
     if not doc:
         raise HTTPException(404, "Document not found")
     return doc
+
+
+@router.get("/{doc_id}/signed-url")
+def signed_url(doc_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Short-lived link for <iframe>/<a> (which cannot send an API-key header). Plain URL when auth is off."""
+    if not db.get(Document, doc_id):
+        raise HTTPException(404, "Document not found")
+    path = f"/api/documents/{doc_id}/file"
+    keys = get_settings().api_key_list
+    return {"url": f"{path}?token={sign_file_token(keys[0], str(doc_id))}" if keys else path, "expires_in": 300 if keys else None}
 
 
 @router.get("/{doc_id}/file")

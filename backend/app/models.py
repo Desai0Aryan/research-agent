@@ -29,6 +29,7 @@ class Document(Base):
     mime: Mapped[str] = mapped_column(String(128), default="application/pdf")
     num_pages: Mapped[int] = mapped_column(Integer, default=0)
     num_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    ocr_pages: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # pages recovered via OCR
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|processing|ready|failed
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -13,6 +13,7 @@ class DocumentOut(BaseModel):
     mime: str
     num_pages: int
     num_chunks: int
+    ocr_pages: int = 0
     status: str
     error: str | None = None
     created_at: datetime

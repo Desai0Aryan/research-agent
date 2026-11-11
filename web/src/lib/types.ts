@@ -1,7 +1,7 @@
 export type Verdict = "supported" | "partial" | "unsupported";
 
 export interface Doc {
-  id: string; filename: string; title: string; mime: string; num_pages: number; num_chunks: number;
+  id: string; filename: string; title: string; mime: string; num_pages: number; num_chunks: number; ocr_pages: number;
   status: "pending" | "processing" | "ready" | "failed"; error?: string | null; created_at: string;
 }
 export interface Claim {

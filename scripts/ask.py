@@ -15,7 +15,10 @@ p.add_argument("--lenient", action="store_true", help="keep unsupported claims (
 a = p.parse_args()
 
 body = {"question": a.question, "strict": not a.lenient}
-with httpx.stream("POST", f"{a.api}/api/research/stream", json=body, timeout=600) as r:
+import os
+
+HEADERS = {"X-API-Key": os.environ["API_KEY"]} if os.environ.get("API_KEY") else {}
+with httpx.stream("POST", f"{a.api}/api/research/stream", json=body, headers=HEADERS, timeout=600) as r:
     for line in r.iter_lines():
         if not line.startswith("data: "):
             continue

@@ -1,17 +1,24 @@
 "use client";
 import { BadgeCheck, ExternalLink, FileText } from "lucide-react";
-import { useState } from "react";
-import { API } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { API, api } from "@/lib/api";
 import { locateQuote, pct } from "@/lib/text";
 import type { Claim, Evidence } from "@/lib/types";
 import { Badge, Empty } from "./ui";
 
 export function SourcePanel({ evidence, claim }: { evidence: Evidence | null; claim?: Claim | null }) {
   const [showPdf, setShowPdf] = useState(false);
+  const [signed, setSigned] = useState<string | null>(null);
+  const docId = evidence?.document_id;
+  useEffect(() => {
+    setSigned(null);
+    if (docId) api.signedFile(docId).then((r) => setSigned(r.url)).catch(() => setSigned(null));
+  }, [docId]);
   if (!evidence) return <Empty icon={<FileText className="h-5 w-5" />} title="Select a citation" hint="Click any [n] marker in the report to read the exact source passage and open the page." />;
   const parts = locateQuote(evidence.text, claim?.quote);
   const isPdf = evidence.filename.toLowerCase().endsWith(".pdf");
-  const href = `${API}${evidence.url}`;
+  const base = signed ?? `/api/documents/${evidence.document_id}/file`;
+  const href = `${API}${base}#page=${evidence.page}`;
   return (
     <div className="space-y-3 animate-fadeUp" key={evidence.id + (claim?.id ?? "")}>
       <div className="flex flex-wrap items-center gap-2">

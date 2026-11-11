@@ -21,11 +21,14 @@ SAMPLES = Path(__file__).resolve().parents[2] / "samples"
 def client():
     from fastapi.testclient import TestClient
 
+    from sqlalchemy import text
+
     from app.db import engine
     from app.main import app
-    from app.models import Base
 
-    Base.metadata.drop_all(engine)
+    with engine.begin() as c:  # clean slate, including alembic_version
+        c.execute(text("DROP SCHEMA public CASCADE"))
+        c.execute(text("CREATE SCHEMA public"))
     with TestClient(app) as c:
         files = [("files", (p.name, p.read_bytes())) for p in sorted(SAMPLES.glob("*.md"))]
         assert c.post("/api/documents", files=files).status_code == 202
